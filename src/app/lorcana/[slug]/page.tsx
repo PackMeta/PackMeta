@@ -1,0 +1,204 @@
+import Link from "next/link";
+import { notFound } from "next/navigation";
+import { db } from "@/db";
+import { sql } from "drizzle-orm";
+
+export const revalidate = 3600;
+
+type SetMeta = {
+  id: number;
+  slug: string;
+  set_code: string;
+  name: string;
+  release_date: string | null;
+  card_count: number;
+};
+
+type CardRow = {
+  name: string;
+  rarity: string;
+  variant: string | null;
+  card_number: string;
+  current_market_cents: number;
+};
+
+type ProductRow = {
+  slug: string;
+  name: string;
+  product_type: string;
+  pack_count: number | null;
+  current_market_cents: number | null;
+  current_ev_cents: number | null;
+  current_roi_pct: number | null;
+};
+
+async function loadSet(slug: string): Promise<{ set: SetMeta; cards: CardRow[]; products: ProductRow[] } | null> {
+  const setRows = await db.execute<SetMeta & { id: number; card_count: number }>(sql`
+    SELECT s.id, s.slug, s.set_code, s.name, s.release_date::text,
+           (SELECT COUNT(*)::int FROM cards WHERE set_id = s.id) AS card_count
+    FROM sets s JOIN games g ON g.id = s.game_id
+    WHERE g.slug = 'lorcana' AND s.slug = ${slug}
+  `);
+  const set = setRows[0];
+  if (!set) return null;
+
+  const cards = await db.execute<CardRow>(sql`
+    SELECT name, rarity, variant, card_number, current_market_cents
+    FROM cards
+    WHERE set_id = ${set.id} AND current_market_cents IS NOT NULL
+    ORDER BY current_market_cents DESC
+    LIMIT 12
+  `);
+
+  const products = await db.execute<ProductRow>(sql`
+    SELECT slug, name, product_type, pack_count, current_market_cents, current_ev_cents, current_roi_pct::float AS current_roi_pct
+    FROM products
+    WHERE set_id = ${set.id}
+    ORDER BY
+      CASE WHEN current_roi_pct IS NULL THEN 1 ELSE 0 END,
+      current_roi_pct DESC NULLS LAST,
+      pack_count NULLS LAST
+  `);
+
+  return { set, cards: Array.from(cards), products: Array.from(products) };
+}
+
+export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const data = await loadSet(slug);
+  if (!data) return { title: "Set not found" };
+  return {
+    title: `Lorcana ${data.set.name} — Pack EV`,
+    description: `Should you rip Disney Lorcana ${data.set.name}? Live pack expected value, top chase cards, and box ROI from market data.`,
+  };
+}
+
+export default async function LorcanaSetPage({ params }: { params: Promise<{ slug: string }> }) {
+  const { slug } = await params;
+  const data = await loadSet(slug);
+  if (!data) notFound();
+
+  const { set, cards, products } = data;
+  const bestProduct = products.find((p) => p.current_roi_pct != null && p.current_roi_pct > 0);
+  const ripIt = bestProduct != null;
+
+  return (
+    <main className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-amber-400 selection:text-zinc-950">
+      <div className="mx-auto max-w-5xl px-6 py-16 sm:px-10">
+        <div className="flex items-center gap-3 text-sm">
+          <Link href="/" className="text-amber-400 hover:text-amber-300">PackMeta</Link>
+          <span className="text-zinc-700">/</span>
+          <Link href="/lorcana" className="text-zinc-400 hover:text-zinc-200">Lorcana</Link>
+          <span className="text-zinc-700">/</span>
+          <span className="text-zinc-200">{set.name}</span>
+        </div>
+
+        <header className="mt-8">
+          <div className="flex items-baseline gap-3">
+            <span className="font-mono text-sm text-zinc-500">{set.set_code}</span>
+            {set.release_date && (
+              <span className="text-sm text-zinc-500">{set.release_date}</span>
+            )}
+            <span className="text-sm text-zinc-500">· {set.card_count} cards</span>
+          </div>
+          <h1 className="mt-2 text-balance text-4xl font-semibold tracking-tight sm:text-5xl">
+            {set.name}
+          </h1>
+        </header>
+
+        {/* Verdict card */}
+        <section className="mt-10">
+          {ripIt ? (
+            <div className="rounded-2xl bg-emerald-400/10 p-6 ring-1 ring-emerald-400/30">
+              <p className="text-xs font-medium uppercase tracking-widest text-emerald-400">Verdict</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight">Rip it.</p>
+              <p className="mt-3 max-w-2xl text-zinc-300">
+                Best deal right now: <span className="font-medium text-emerald-300">{bestProduct!.name}</span>.{" "}
+                Market <span className="font-mono">${((bestProduct!.current_market_cents ?? 0) / 100).toFixed(2)}</span>,
+                expected value <span className="font-mono">${((bestProduct!.current_ev_cents ?? 0) / 100).toFixed(2)}</span> —
+                that&apos;s <span className="font-semibold text-emerald-300">+{bestProduct!.current_roi_pct!.toFixed(1)}% ROI</span> on average.
+              </p>
+            </div>
+          ) : (
+            <div className="rounded-2xl bg-zinc-900/60 p-6 ring-1 ring-zinc-800">
+              <p className="text-xs font-medium uppercase tracking-widest text-zinc-400">Verdict</p>
+              <p className="mt-2 text-3xl font-semibold tracking-tight">Hold.</p>
+              <p className="mt-3 max-w-2xl text-zinc-400">
+                No sealed product for {set.name} currently trades below its expected card value.
+                Collectors are paying a premium over the math. Wait for prices to drop or chase singles instead.
+              </p>
+            </div>
+          )}
+        </section>
+
+        {/* Products table */}
+        <section className="mt-12">
+          <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Sealed products</h2>
+          <div className="mt-4 overflow-x-auto rounded-xl ring-1 ring-zinc-800">
+            <table className="w-full text-sm">
+              <thead className="bg-zinc-900/80 text-left text-xs uppercase tracking-wide text-zinc-500">
+                <tr>
+                  <th className="px-4 py-3 font-medium">Product</th>
+                  <th className="px-4 py-3 text-right font-medium">Packs</th>
+                  <th className="px-4 py-3 text-right font-medium">Price</th>
+                  <th className="px-4 py-3 text-right font-medium">EV</th>
+                  <th className="px-4 py-3 text-right font-medium">ROI</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-zinc-900">
+                {products.map((p) => {
+                  const roi = p.current_roi_pct;
+                  const positive = roi != null && roi > 0;
+                  return (
+                    <tr key={p.slug} className="bg-zinc-950 hover:bg-zinc-900/40">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-zinc-100">{p.name}</div>
+                        <div className="text-xs text-zinc-500">{p.product_type}</div>
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono text-zinc-400">{p.pack_count ?? "—"}</td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {p.current_market_cents != null ? `$${(p.current_market_cents / 100).toFixed(2)}` : "—"}
+                      </td>
+                      <td className="px-4 py-3 text-right font-mono">
+                        {p.current_ev_cents != null ? `$${(p.current_ev_cents / 100).toFixed(2)}` : "—"}
+                      </td>
+                      <td className={`px-4 py-3 text-right font-mono ${positive ? "text-emerald-400" : "text-zinc-500"}`}>
+                        {roi != null ? `${roi > 0 ? "+" : ""}${roi.toFixed(1)}%` : "—"}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        {/* Top chase cards */}
+        <section className="mt-12">
+          <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Top chase cards</h2>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {cards.map((c) => (
+              <div key={c.card_number + c.name} className="flex items-baseline justify-between rounded-lg bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800">
+                <div>
+                  <div className="text-sm font-medium text-zinc-100">{c.name}</div>
+                  <div className="text-xs text-zinc-500">
+                    {c.rarity}
+                    {c.variant && c.variant !== "Normal" ? ` · ${c.variant}` : ""}
+                    {" · "}#{c.card_number}
+                  </div>
+                </div>
+                <div className="ml-3 font-mono text-amber-400">${(c.current_market_cents / 100).toFixed(2)}</div>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <p className="mt-16 text-xs text-zinc-600">
+          EV is a 10,000-iteration Monte Carlo simulation — the *average* outcome across many packs.
+          Your individual pack will vary widely; most packs return $1–3 with rare high-value pulls swinging the mean.
+          Prices via JustTCG, updated periodically.
+        </p>
+      </div>
+    </main>
+  );
+}

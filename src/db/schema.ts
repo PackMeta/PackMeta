@@ -137,7 +137,8 @@ export const cards = pgTable(
       .notNull(),
   },
   (t) => [
-    uniqueIndex("cards_set_number_variant_idx").on(
+    uniqueIndex("cards_justtcg_card_id_idx").on(t.justtcgCardId),
+    index("cards_set_number_variant_idx").on(
       t.setId,
       t.cardNumber,
       t.variant,

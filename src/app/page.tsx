@@ -17,7 +17,7 @@ export default function Home() {
           </p>
 
           <div className="mt-12 flex flex-wrap gap-3 text-sm">
-            <Tag>Lorcana</Tag>
+            <Tag href="/lorcana">Lorcana</Tag>
             <Tag>One Piece TCG</Tag>
             <Tag>Pokémon</Tag>
             <Tag muted>+ more soon</Tag>
@@ -49,19 +49,21 @@ export default function Home() {
 function Tag({
   children,
   muted = false,
+  href,
 }: {
   children: React.ReactNode;
   muted?: boolean;
+  href?: string;
 }) {
-  return (
-    <span
-      className={
-        muted
-          ? "rounded-full border border-zinc-800 px-3 py-1 text-zinc-500"
-          : "rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 font-medium text-amber-300"
-      }
-    >
-      {children}
-    </span>
-  );
+  const className = muted
+    ? "rounded-full border border-zinc-800 px-3 py-1 text-zinc-500"
+    : "rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 font-medium text-amber-300";
+  if (href) {
+    return (
+      <a href={href} className={`${className} transition hover:bg-amber-400/20`}>
+        {children}
+      </a>
+    );
+  }
+  return <span className={className}>{children}</span>;
 }
