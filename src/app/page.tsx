@@ -62,7 +62,7 @@ export default async function Home() {
 
           <div className="mt-10 flex flex-wrap gap-3 text-sm">
             <Tag href="/lorcana">Lorcana</Tag>
-            <Tag muted>One Piece TCG — soon</Tag>
+            <Tag href="/one-piece">One Piece</Tag>
             <Tag muted>Pokémon — soon</Tag>
           </div>
         </section>
@@ -118,9 +118,11 @@ export default async function Home() {
           <p className="max-w-2xl leading-relaxed">
             PackMeta calculates pack expected value using community-tracked
             pull rates and live secondary-market prices via JustTCG. EV is
-            an average — your individual pack will vary. Not affiliated with
-            Disney, Ravensburger, Bandai, The Pokémon Company, or any
-            publisher.
+            an average — your individual pack will vary.{" "}
+            <Link href="/methodology" className="text-zinc-400 underline hover:text-zinc-200">
+              Read the methodology
+            </Link>
+            . Not affiliated with Disney, Ravensburger, Bandai, The Pokémon Company, or any publisher.
           </p>
           <p className="mt-4 text-zinc-600">© 2026 PackMeta</p>
         </footer>

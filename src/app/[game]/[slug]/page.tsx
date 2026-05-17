@@ -2,6 +2,7 @@ import Link from "next/link";
 import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
+import { getGame } from "@/lib/games";
 
 export const revalidate = 3600;
 
@@ -32,12 +33,12 @@ type ProductRow = {
   current_roi_pct: number | null;
 };
 
-async function loadSet(slug: string): Promise<{ set: SetMeta; cards: CardRow[]; products: ProductRow[] } | null> {
-  const setRows = await db.execute<SetMeta & { id: number; card_count: number }>(sql`
+async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; cards: CardRow[]; products: ProductRow[] } | null> {
+  const setRows = await db.execute<SetMeta & { card_count: number }>(sql`
     SELECT s.id, s.slug, s.set_code, s.name, s.release_date::text,
            (SELECT COUNT(*)::int FROM cards WHERE set_id = s.id) AS card_count
     FROM sets s JOIN games g ON g.id = s.game_id
-    WHERE g.slug = 'lorcana' AND s.slug = ${slug}
+    WHERE g.slug = ${gameSlug} AND s.slug = ${slug}
   `);
   const set = setRows[0];
   if (!set) return null;
@@ -63,19 +64,23 @@ async function loadSet(slug: string): Promise<{ set: SetMeta; cards: CardRow[]; 
   return { set, cards: Array.from(cards), products: Array.from(products) };
 }
 
-export async function generateMetadata({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  const data = await loadSet(slug);
+export async function generateMetadata({ params }: { params: Promise<{ game: string; slug: string }> }) {
+  const { game, slug } = await params;
+  const meta = getGame(game);
+  if (!meta) return { title: "Set not found" };
+  const data = await loadSet(game, slug);
   if (!data) return { title: "Set not found" };
   return {
-    title: `Lorcana ${data.set.name} — Pack EV`,
-    description: `Should you rip Disney Lorcana ${data.set.name}? Live pack expected value, top chase cards, and box ROI from market data.`,
+    title: `${meta.name} ${data.set.name} — Pack EV`,
+    description: `Should you rip ${meta.fullName} ${data.set.name}? Live pack expected value, top chase cards, and box ROI from market data.`,
   };
 }
 
-export default async function LorcanaSetPage({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  const data = await loadSet(slug);
+export default async function SetPage({ params }: { params: Promise<{ game: string; slug: string }> }) {
+  const { game, slug } = await params;
+  const meta = getGame(game);
+  if (!meta) notFound();
+  const data = await loadSet(game, slug);
   if (!data) notFound();
 
   const { set, cards, products } = data;
@@ -88,7 +93,7 @@ export default async function LorcanaSetPage({ params }: { params: Promise<{ slu
         <div className="flex items-center gap-3 text-sm">
           <Link href="/" className="text-amber-400 hover:text-amber-300">PackMeta</Link>
           <span className="text-zinc-700">/</span>
-          <Link href="/lorcana" className="text-zinc-400 hover:text-zinc-200">Lorcana</Link>
+          <Link href={`/${game}`} className="text-zinc-400 hover:text-zinc-200">{meta.name}</Link>
           <span className="text-zinc-700">/</span>
           <span className="text-zinc-200">{set.name}</span>
         </div>
@@ -106,7 +111,6 @@ export default async function LorcanaSetPage({ params }: { params: Promise<{ slu
           </h1>
         </header>
 
-        {/* Verdict card */}
         <section className="mt-10">
           {ripIt ? (
             <div className="rounded-2xl bg-emerald-400/10 p-6 ring-1 ring-emerald-400/30">
@@ -131,7 +135,6 @@ export default async function LorcanaSetPage({ params }: { params: Promise<{ slu
           )}
         </section>
 
-        {/* Products table */}
         <section className="mt-12">
           <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Sealed products</h2>
           <div className="mt-4 overflow-x-auto rounded-xl ring-1 ring-zinc-800">
@@ -173,7 +176,6 @@ export default async function LorcanaSetPage({ params }: { params: Promise<{ slu
           </div>
         </section>
 
-        {/* Top chase cards */}
         <section className="mt-12">
           <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Top chase cards</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">

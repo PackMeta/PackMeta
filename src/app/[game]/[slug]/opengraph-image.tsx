@@ -1,6 +1,7 @@
 import { ImageResponse } from "next/og";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
+import { getGame } from "@/lib/games";
 
 export const alt = "PackMeta — Should you rip it?";
 export const size = { width: 1200, height: 630 };
@@ -17,12 +18,12 @@ type Data = {
   top_card_cents: number | null;
 };
 
-async function loadOgData(slug: string): Promise<Data | null> {
+async function loadOgData(gameSlug: string, slug: string): Promise<Data | null> {
   const rows = await db.execute<Data>(sql`
     WITH meta AS (
       SELECT s.id, s.name AS set_name, s.set_code
       FROM sets s JOIN games g ON g.id = s.game_id
-      WHERE g.slug = 'lorcana' AND s.slug = ${slug}
+      WHERE g.slug = ${gameSlug} AND s.slug = ${slug}
     ),
     best_prod AS (
       SELECT DISTINCT ON (p.set_id) p.set_id, p.name AS best_product_name,
@@ -32,7 +33,7 @@ async function loadOgData(slug: string): Promise<Data | null> {
       FROM products p
       WHERE p.set_id = (SELECT id FROM meta)
         AND p.current_roi_pct IS NOT NULL
-        AND p.current_roi_pct <= 100  /* cap outlier mispricings */
+        AND p.current_roi_pct <= 100
       ORDER BY p.set_id, p.current_roi_pct DESC
     ),
     top_card AS (
@@ -51,16 +52,16 @@ async function loadOgData(slug: string): Promise<Data | null> {
   return rows[0] ?? null;
 }
 
-export default async function Image({ params }: { params: Promise<{ slug: string }> }) {
-  const { slug } = await params;
-  const data = await loadOgData(slug);
-  if (!data) {
+export default async function Image({ params }: { params: Promise<{ game: string; slug: string }> }) {
+  const { game, slug } = await params;
+  const gameMeta = getGame(game);
+  const data = gameMeta ? await loadOgData(game, slug) : null;
+
+  if (!data || !gameMeta) {
     return new ImageResponse(
-      (
-        <div style={{ ...baseStyle, justifyContent: "center", alignItems: "center" }}>
-          <div style={{ fontSize: 64, color: "#fbbf24" }}>PackMeta</div>
-        </div>
-      ),
+      (<div style={{ ...baseStyle, justifyContent: "center", alignItems: "center" }}>
+        <div style={{ fontSize: 64, color: "#fbbf24" }}>PackMeta</div>
+      </div>),
       size,
     );
   }
@@ -68,29 +69,25 @@ export default async function Image({ params }: { params: Promise<{ slug: string
   const ripIt = data.best_roi_pct != null && data.best_roi_pct > 0;
   const verdictColor = ripIt ? "#34d399" : "#71717a";
   const verdictLabel = ripIt ? "RIP IT" : "HOLD";
-  const usd = (cents: number | null) => (cents != null ? `$${(cents / 100).toFixed(2)}` : "—");
 
   return new ImageResponse(
     (
       <div style={baseStyle}>
-        {/* Brand strip */}
         <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
           <div style={{ width: 12, height: 12, borderRadius: 999, background: "#fbbf24" }} />
           <div style={{ color: "#fbbf24", fontSize: 24, fontWeight: 600, letterSpacing: 2 }}>PACKMETA</div>
         </div>
 
-        {/* Set title */}
         <div style={{ display: "flex", flexDirection: "column", marginTop: 56 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 16, color: "#71717a", fontSize: 26 }}>
             <span style={{ fontFamily: "monospace" }}>{data.set_code}</span>
-            <span>Disney Lorcana</span>
+            <span>{gameMeta.fullName}</span>
           </div>
           <div style={{ color: "#f4f4f5", fontSize: 88, fontWeight: 700, lineHeight: 1.05, marginTop: 4 }}>
             {data.set_name}
           </div>
         </div>
 
-        {/* Verdict block */}
         <div style={{ display: "flex", alignItems: "center", gap: 28, marginTop: 56 }}>
           <div
             style={{
@@ -113,14 +110,13 @@ export default async function Image({ params }: { params: Promise<{ slug: string
               </span>
               {data.best_product_name && (
                 <span style={{ color: "#a1a1aa", fontSize: 22, marginTop: 4 }}>
-                  {data.best_product_name.replace("Disney Lorcana: ", "")}
+                  {data.best_product_name.replace(/^(Disney Lorcana: |One Piece Card Game )/, "")}
                 </span>
               )}
             </div>
           )}
         </div>
 
-        {/* Bottom strip — top chase */}
         {data.top_card_name && data.top_card_cents != null && (
           <div
             style={{
@@ -139,7 +135,7 @@ export default async function Image({ params }: { params: Promise<{ slug: string
               </span>
             </div>
             <div style={{ color: "#fbbf24", fontSize: 52, fontWeight: 700, fontFamily: "monospace" }}>
-              {usd(data.top_card_cents)}
+              ${(data.top_card_cents / 100).toFixed(2)}
             </div>
           </div>
         )}
