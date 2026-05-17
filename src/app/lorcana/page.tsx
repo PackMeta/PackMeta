@@ -34,6 +34,7 @@ async function loadSets(): Promise<SetRow[]> {
       SELECT DISTINCT ON (p.set_id) p.set_id, p.name, p.current_roi_pct
       FROM products p
       WHERE p.current_roi_pct IS NOT NULL
+        AND p.current_roi_pct <= 100
         AND p.product_type IN ('booster_pack', 'sleeved_booster_pack', 'booster_box', 'booster_case')
       ORDER BY p.set_id, p.current_roi_pct DESC
     ),

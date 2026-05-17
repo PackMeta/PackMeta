@@ -32,6 +32,7 @@ async function loadHotProducts(): Promise<Hot[]> {
     WHERE p.current_roi_pct IS NOT NULL
       AND p.current_market_cents IS NOT NULL
       AND p.current_market_cents > 1000  /* > $10 — filter mispriced micro-products */
+      AND p.current_roi_pct BETWEEN 0 AND 100  /* cap to filter stale/outlier prices */
       AND p.product_type IN ('booster_pack', 'sleeved_booster_pack', 'booster_box', 'booster_case', 'trove')
     ORDER BY p.current_roi_pct DESC
     LIMIT 8
