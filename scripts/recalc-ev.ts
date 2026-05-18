@@ -8,11 +8,10 @@ async function main() {
   const url = process.env.DATABASE_URL_POOLED!;
   const sql = postgres(url, { prepare: false });
 
-  const sets = await sql<{ id: number; slug: string; set_code: string }[]>`
-    SELECT s.id, s.slug, s.set_code
+  const sets = await sql<{ id: number; slug: string; set_code: string; game_slug: string }[]>`
+    SELECT s.id, s.slug, s.set_code, g.slug AS game_slug
     FROM sets s JOIN games g ON g.id = s.game_id
-    WHERE g.slug = 'lorcana'
-    ORDER BY s.release_date NULLS LAST, s.set_code
+    ORDER BY g.slug, s.release_date NULLS LAST, s.set_code
   `;
 
   console.log(`Recalculating EV for ${sets.length} sets...\n`);
@@ -20,10 +19,20 @@ async function main() {
 
   for (const set of sets) {
     // 1. Load cards keyed by rarity, with current price in cents
+    // Exclude special variant prints from EV sampling — they share a rarity
+    // label with regular cards but are 100x rarer in real packs.
     const cardRows = await sql<{ rarity: string; current_market_cents: number | null }[]>`
       SELECT rarity, current_market_cents
       FROM cards
       WHERE set_id = ${set.id} AND current_market_cents IS NOT NULL
+        AND name NOT ILIKE '%(Alternate Art)%'
+        AND name NOT ILIKE '%(Manga)%'
+        AND name NOT ILIKE '%(Parallel)%'
+        AND name NOT ILIKE '%(Gold-Stamped%'
+        AND name NOT ILIKE '%(SP)%'
+        AND name NOT ILIKE '%(Special Card)%'
+        AND name NOT ILIKE '%(Treasure)%'
+        AND name NOT ILIKE '%(Super%Alternate%'
     `;
     const cardsByRarity = new Map<string, CardLite[]>();
     for (const r of cardRows) {

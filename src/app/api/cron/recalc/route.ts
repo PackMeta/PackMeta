@@ -32,10 +32,21 @@ export async function GET(req: Request) {
     `;
 
     for (const set of sets) {
+      // Exclude special variant prints — they share a rarity label with regular
+      // cards but are 100x rarer in real packs (One Piece Manga AA, Gold-Stamped,
+      // Parallel, etc.). Including them inflates EV by orders of magnitude.
       const cardRows = await sql<{ rarity: string; current_market_cents: number | null }[]>`
         SELECT rarity, current_market_cents
         FROM cards
         WHERE set_id = ${set.id} AND current_market_cents IS NOT NULL
+          AND name NOT ILIKE '%(Alternate Art)%'
+          AND name NOT ILIKE '%(Manga)%'
+          AND name NOT ILIKE '%(Parallel)%'
+          AND name NOT ILIKE '%(Gold-Stamped%'
+          AND name NOT ILIKE '%(SP)%'
+          AND name NOT ILIKE '%(Special Card)%'
+          AND name NOT ILIKE '%(Treasure)%'
+          AND name NOT ILIKE '%(Super%Alternate%'
       `;
       if (cardRows.length === 0) continue;
 
