@@ -84,11 +84,34 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
   if (!data) notFound();
 
   const { set, cards, products } = data;
-  const bestProduct = products.find((p) => p.current_roi_pct != null && p.current_roi_pct > 0);
+  // Pick a credible "best deal" — positive ROI, but not a clearly stale/mispriced outlier.
+  // Anything >100% is almost always a low-volume product with a wrong sticker price.
+  const bestProduct = products.find((p) => p.current_roi_pct != null && p.current_roi_pct > 0 && p.current_roi_pct <= 100);
   const ripIt = bestProduct != null;
+
+  const breadcrumbJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "BreadcrumbList",
+    itemListElement: [
+      { "@type": "ListItem", position: 1, name: "PackMeta", item: "https://packmeta.app" },
+      { "@type": "ListItem", position: 2, name: meta.fullName, item: `https://packmeta.app/${game}` },
+      { "@type": "ListItem", position: 3, name: set.name, item: `https://packmeta.app/${game}/${set.slug}` },
+    ],
+  };
+  const pageJsonLd = {
+    "@context": "https://schema.org",
+    "@type": "WebPage",
+    name: `${meta.name} ${set.name} — Pack EV`,
+    description: `Should you rip ${meta.fullName} ${set.name}? Verdict: ${ripIt ? "Rip it" : "Hold"}. Live pack expected value, top chase cards, and product ROI from market data.`,
+    url: `https://packmeta.app/${game}/${set.slug}`,
+    isPartOf: { "@type": "WebSite", name: "PackMeta", url: "https://packmeta.app" },
+    about: { "@type": "Thing", name: `${meta.fullName} ${set.name}` },
+  };
 
   return (
     <main className="min-h-screen bg-zinc-950 text-zinc-100 selection:bg-amber-400 selection:text-zinc-950">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumbJsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(pageJsonLd) }} />
       <div className="mx-auto max-w-5xl px-6 py-16 sm:px-10">
         <div className="flex items-center gap-3 text-sm">
           <Link href="/" className="text-amber-400 hover:text-amber-300">PackMeta</Link>
