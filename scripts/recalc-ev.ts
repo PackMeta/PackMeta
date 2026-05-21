@@ -65,7 +65,8 @@ async function main() {
       continue;
     }
 
-    const setData: SetData = { cardsByRarity, ratesBySlot, cardsPerPack: 12 };
+    const cardsPerPack = set.game_slug === "pokemon" ? 10 : 12;
+    const setData: SetData = { cardsByRarity, ratesBySlot, cardsPerPack };
 
     // 3. For each product in this set with a pack_count, simulate
     const products = await sql<{ id: number; slug: string; name: string; product_type: string; pack_count: number | null; current_market_cents: number | null }[]>`

@@ -63,7 +63,7 @@ export default async function Home() {
           <div className="mt-10 flex flex-wrap gap-3 text-sm">
             <Tag href="/lorcana">Lorcana</Tag>
             <Tag href="/one-piece">One Piece</Tag>
-            <Tag muted>Pokémon — soon</Tag>
+            <Tag href="/pokemon">Pokémon</Tag>
           </div>
         </section>
 

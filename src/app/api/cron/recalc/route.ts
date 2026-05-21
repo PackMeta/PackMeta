@@ -71,7 +71,8 @@ export async function GET(req: Request) {
         ratesBySlot.set(r.slot_index, arr);
       }
 
-      const setData: SetData = { cardsByRarity, ratesBySlot, cardsPerPack: 12 };
+      const cardsPerPack = set.game_slug === "pokemon" ? 10 : 12;
+      const setData: SetData = { cardsByRarity, ratesBySlot, cardsPerPack };
 
       const products = await sql<{ id: number; pack_count: number; current_market_cents: number | null }[]>`
         SELECT id, pack_count, current_market_cents

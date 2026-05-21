@@ -20,6 +20,13 @@ export const GAMES: Record<string, Game> = {
     blurb:
       "Pack expected value across main booster sets, calculated from live market prices and Bandai-published pull rates.",
   },
+  pokemon: {
+    slug: "pokemon",
+    name: "Pokémon",
+    fullName: "Pokémon TCG",
+    blurb:
+      "Pack expected value across Scarlet & Violet and Mega Evolution era sets, calculated from live market prices and TCGplayer pull rates.",
+  },
 };
 
 export function getGame(slug: string): Game | null {

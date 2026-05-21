@@ -41,6 +41,7 @@ async function fetchJson(url: string, apiKey: string): Promise<unknown> {
 const JUSTTCG_GAME_IDS: Record<string, string> = {
   lorcana: "disney-lorcana",
   "one-piece": "one-piece-card-game",
+  pokemon: "pokemon",
 };
 
 async function fetchAllCards(setId: string, justtcgGameId: string, apiKey: string): Promise<Card[]> {
