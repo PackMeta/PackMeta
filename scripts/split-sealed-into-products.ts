@@ -13,21 +13,34 @@ function slugify(s: string): string {
     .replace(/^-+|-+$/g, "");
 }
 
-function classifyProductType(name: string): {
+function classifyProductType(name: string, gameSlug: string): {
   type: string;
   packCount: number | null;
   cardsPerPack: number | null;
 } {
   const n = name.toLowerCase();
-  // Order matters — case before box before sleeved-booster-pack before pack
-  if (n.includes("case")) return { type: "booster_case", packCount: 96, cardsPerPack: 12 };
-  if (n.includes("illumineer's trove") || n.includes("trove")) return { type: "trove", packCount: 8, cardsPerPack: 12 };
+  const cpp = gameSlug === "pokemon" ? 10 : 12;
+
+  // Pokemon-specific products (Elite Trainer Box, Booster Bundle) — handle before generic patterns
+  if (gameSlug === "pokemon") {
+    if (n.includes("elite trainer box") && n.includes("case")) return { type: "etb_case", packCount: 9 * 6, cardsPerPack: cpp };
+    if (n.includes("elite trainer box")) return { type: "etb", packCount: 9, cardsPerPack: cpp };
+    if (n.includes("booster bundle") && n.includes("case")) return { type: "bundle_case", packCount: 6 * 12, cardsPerPack: cpp };
+    if (n.includes("booster bundle")) return { type: "booster_bundle", packCount: 6, cardsPerPack: cpp };
+    if (n.includes("booster box") && n.includes("case")) return { type: "booster_case", packCount: 36 * 6, cardsPerPack: cpp };
+    if (n.includes("booster box")) return { type: "booster_box", packCount: 36, cardsPerPack: cpp };
+    if (n.includes("booster pack")) return { type: "booster_pack", packCount: 1, cardsPerPack: cpp };
+  }
+
+  // Lorcana / One Piece generic patterns
+  if (n.includes("case")) return { type: "booster_case", packCount: 96, cardsPerPack: cpp };
+  if (n.includes("illumineer's trove") || n.includes("trove")) return { type: "trove", packCount: 8, cardsPerPack: cpp };
   if (n.includes("starter deck display")) return { type: "starter_display", packCount: null, cardsPerPack: null };
   if (n.includes("starter deck")) return { type: "starter_deck", packCount: null, cardsPerPack: 60 };
   if (n.includes("gift set")) return { type: "gift_set", packCount: null, cardsPerPack: null };
-  if (n.includes("booster box")) return { type: "booster_box", packCount: 24, cardsPerPack: 12 };
-  if (n.includes("sleeved booster pack")) return { type: "sleeved_booster_pack", packCount: 1, cardsPerPack: 12 };
-  if (n.includes("booster pack")) return { type: "booster_pack", packCount: 1, cardsPerPack: 12 };
+  if (n.includes("booster box")) return { type: "booster_box", packCount: 24, cardsPerPack: cpp };
+  if (n.includes("sleeved booster pack")) return { type: "sleeved_booster_pack", packCount: 1, cardsPerPack: cpp };
+  if (n.includes("booster pack")) return { type: "booster_pack", packCount: 1, cardsPerPack: cpp };
   return { type: "other", packCount: null, cardsPerPack: null };
 }
 
@@ -44,12 +57,16 @@ async function main() {
       tcgplayer_product_id: number | null;
       current_market_cents: number | null;
       last_price_at: Date | null;
+      game_slug: string;
     }[]
   >`
-    SELECT id, set_id, name, justtcg_card_id, tcgplayer_product_id, current_market_cents, last_price_at
-    FROM cards
-    WHERE rarity = 'None'
-    ORDER BY set_id, current_market_cents DESC NULLS LAST
+    SELECT c.id, c.set_id, c.name, c.justtcg_card_id, c.tcgplayer_product_id,
+           c.current_market_cents, c.last_price_at, g.slug AS game_slug
+    FROM cards c
+    JOIN sets s ON s.id = c.set_id
+    JOIN games g ON g.id = s.game_id
+    WHERE c.rarity IS NULL OR c.rarity = 'None' OR c.rarity = ''
+    ORDER BY c.set_id, c.current_market_cents DESC NULLS LAST
   `;
 
   console.log(`Found ${sealed.length} sealed rows in cards table.`);
@@ -59,7 +76,7 @@ async function main() {
 
   await sql.begin(async (tx) => {
     for (const row of sealed) {
-      const cls = classifyProductType(row.name);
+      const cls = classifyProductType(row.name, row.game_slug);
       let slug = slugify(row.name.replace(/^disney lorcana:?\s*/i, ""));
       if (!slug) slug = `product-${row.id}`;
 
