@@ -3,6 +3,7 @@ import { notFound } from "next/navigation";
 import { db } from "@/db";
 import { sql } from "drizzle-orm";
 import { getGame } from "@/lib/games";
+import { tcgplayerProductUrl } from "@/lib/tcgplayer";
 
 export const revalidate = 3600;
 
@@ -21,6 +22,7 @@ type CardRow = {
   variant: string | null;
   card_number: string;
   current_market_cents: number;
+  tcgplayer_product_id: number | null;
 };
 
 type ProductRow = {
@@ -31,6 +33,7 @@ type ProductRow = {
   current_market_cents: number | null;
   current_ev_cents: number | null;
   current_roi_pct: number | null;
+  tcgplayer_product_id: number | null;
 };
 
 async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; cards: CardRow[]; products: ProductRow[] } | null> {
@@ -43,16 +46,30 @@ async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; 
   const set = setRows[0];
   if (!set) return null;
 
+  // Chase cards: collapse variant prints by card_number (highest-priced variant wins)
+  // and exclude foreign-set leakage (e.g. OP09 promo card incorrectly tagged to OP13).
+  // The set-code prefix filter only kicks in for games that use a "PREFIX-NUMBER" pattern.
   const cards = await db.execute<CardRow>(sql`
-    SELECT name, rarity, variant, card_number, current_market_cents
-    FROM cards
-    WHERE set_id = ${set.id} AND current_market_cents IS NOT NULL
+    SELECT * FROM (
+      SELECT DISTINCT ON (card_number)
+        name, rarity, variant, card_number, current_market_cents, tcgplayer_product_id
+      FROM cards
+      WHERE set_id = ${set.id}
+        AND current_market_cents IS NOT NULL
+        AND (
+          ${set.set_code}::text IS NULL
+          OR card_number NOT LIKE '%-%'
+          OR card_number ILIKE ${set.set_code} || '-%'
+        )
+      ORDER BY card_number, current_market_cents DESC
+    ) dedup
     ORDER BY current_market_cents DESC
     LIMIT 12
   `);
 
   const products = await db.execute<ProductRow>(sql`
-    SELECT slug, name, product_type, pack_count, current_market_cents, current_ev_cents, current_roi_pct::float AS current_roi_pct
+    SELECT slug, name, product_type, pack_count, current_market_cents, current_ev_cents,
+           current_roi_pct::float AS current_roi_pct, tcgplayer_product_id
     FROM products
     WHERE set_id = ${set.id}
     ORDER BY
@@ -169,12 +186,14 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
                   <th className="px-4 py-3 text-right font-medium">Price</th>
                   <th className="px-4 py-3 text-right font-medium">EV</th>
                   <th className="px-4 py-3 text-right font-medium">ROI</th>
+                  <th className="px-4 py-3 text-right font-medium">Buy</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-zinc-900">
                 {products.map((p) => {
                   const roi = p.current_roi_pct;
                   const positive = roi != null && roi > 0;
+                  const buyUrl = tcgplayerProductUrl(p.tcgplayer_product_id);
                   return (
                     <tr key={p.slug} className="bg-zinc-950 hover:bg-zinc-900/40">
                       <td className="px-4 py-3">
@@ -191,30 +210,68 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
                       <td className={`px-4 py-3 text-right font-mono ${positive ? "text-emerald-400" : "text-zinc-500"}`}>
                         {roi != null ? `${roi > 0 ? "+" : ""}${roi.toFixed(1)}%` : "—"}
                       </td>
+                      <td className="px-4 py-3 text-right">
+                        {buyUrl ? (
+                          <a
+                            href={buyUrl}
+                            target="_blank"
+                            rel="sponsored noopener"
+                            className="inline-flex items-center rounded-md bg-amber-400/10 px-2.5 py-1 text-xs font-medium text-amber-300 ring-1 ring-amber-400/30 transition hover:bg-amber-400/20 hover:text-amber-200"
+                          >
+                            Buy ↗
+                          </a>
+                        ) : (
+                          <span className="text-xs text-zinc-700">—</span>
+                        )}
+                      </td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
           </div>
+          <p className="mt-3 text-xs text-zinc-600">
+            Buy links go to TCGPlayer. We earn a small commission on purchases — costs you nothing extra and keeps the lights on.
+          </p>
         </section>
 
         <section className="mt-12">
           <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Top chase cards</h2>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            {cards.map((c) => (
-              <div key={c.card_number + c.name} className="flex items-baseline justify-between rounded-lg bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800">
-                <div>
-                  <div className="text-sm font-medium text-zinc-100">{c.name}</div>
-                  <div className="text-xs text-zinc-500">
-                    {c.rarity}
-                    {c.variant && c.variant !== "Normal" ? ` · ${c.variant}` : ""}
-                    {" · "}#{c.card_number}
+            {cards.map((c) => {
+              const buyUrl = tcgplayerProductUrl(c.tcgplayer_product_id);
+              const inner = (
+                <>
+                  <div>
+                    <div className="text-sm font-medium text-zinc-100">{c.name}</div>
+                    <div className="text-xs text-zinc-500">
+                      {c.rarity}
+                      {c.variant && c.variant !== "Normal" ? ` · ${c.variant}` : ""}
+                      {" · "}#{c.card_number}
+                    </div>
                   </div>
+                  <div className="ml-3 font-mono text-amber-400">${(c.current_market_cents / 100).toFixed(2)}</div>
+                </>
+              );
+              return buyUrl ? (
+                <a
+                  key={c.card_number + c.name}
+                  href={buyUrl}
+                  target="_blank"
+                  rel="sponsored noopener"
+                  className="flex items-baseline justify-between rounded-lg bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800 transition hover:bg-zinc-900 hover:ring-amber-400/40"
+                >
+                  {inner}
+                </a>
+              ) : (
+                <div
+                  key={c.card_number + c.name}
+                  className="flex items-baseline justify-between rounded-lg bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800"
+                >
+                  {inner}
                 </div>
-                <div className="ml-3 font-mono text-amber-400">${(c.current_market_cents / 100).toFixed(2)}</div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </section>
 
