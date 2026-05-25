@@ -1,19 +1,18 @@
-// TCGPlayer affiliate link builder. Set TCGPLAYER_PARTNER_CODE in Vercel env
-// to start earning ~3.5% on click-throughs. Without it, links still work — they
-// just don't credit us.
+// TCGPlayer Impact affiliate deep-link builder. Set TCGPLAYER_AFFILIATE_BASE
+// in Vercel env to your Impact tracking link prefix, e.g.
+// "https://partner.tcgplayer.com/c/7328132/1780961/21018". Without it, links
+// still work — they just don't credit us.
 
-const PARTNER = process.env.TCGPLAYER_PARTNER_CODE?.trim() || null;
+const AFFILIATE_BASE = process.env.TCGPLAYER_AFFILIATE_BASE?.trim().replace(/\/$/, "") || null;
+
+function wrapAffiliate(destinationUrl: string): string {
+  if (!AFFILIATE_BASE) return destinationUrl;
+  return `${AFFILIATE_BASE}?u=${encodeURIComponent(destinationUrl)}`;
+}
 
 export function tcgplayerProductUrl(productId: number | null | undefined): string | null {
   if (!productId) return null;
-  const url = new URL(`https://www.tcgplayer.com/product/${productId}`);
-  if (PARTNER) {
-    url.searchParams.set("partner", PARTNER);
-    url.searchParams.set("utm_campaign", "affiliate");
-    url.searchParams.set("utm_medium", PARTNER);
-    url.searchParams.set("utm_source", PARTNER);
-  }
-  return url.toString();
+  return wrapAffiliate(`https://www.tcgplayer.com/product/${productId}`);
 }
 
 export function tcgplayerSetSearchUrl(groupId: number | null | undefined): string | null {
@@ -22,11 +21,5 @@ export function tcgplayerSetSearchUrl(groupId: number | null | undefined): strin
   url.searchParams.set("productLineName", "");
   url.searchParams.set("setName", "");
   url.searchParams.set("view", "grid");
-  if (PARTNER) {
-    url.searchParams.set("partner", PARTNER);
-    url.searchParams.set("utm_campaign", "affiliate");
-    url.searchParams.set("utm_medium", PARTNER);
-    url.searchParams.set("utm_source", PARTNER);
-  }
-  return url.toString();
+  return wrapAffiliate(url.toString());
 }
