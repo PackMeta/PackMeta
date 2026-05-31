@@ -36,9 +36,11 @@ export const metadata: Metadata = {
   },
   robots: { index: true, follow: true },
   verification: {
-    google: "u8SGir8Mmx0qyViEpt0_HtvUMFbNpCGbKfzLxriYP6A",
+  google: "u8SGir8Mmx0qyViEpt0_HtvUMFbNpCGbKfzLxriYP6A",
+  other: {
+    "impact-site-verification": "447ce371-818b-4828-b8a2-92d2beb58137",
   },
-};
+},
 
 export default function RootLayout({
   children,
