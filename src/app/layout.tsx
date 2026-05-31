@@ -35,13 +35,10 @@ export const metadata: Metadata = {
       "See the expected value of every TCG pack, box, and bundle. Lorcana, One Piece, Pokémon and more. Updated daily.",
   },
   robots: { index: true, follow: true },
-  
   verification: {
-  google: "u8SGir8Mmx0qyViEpt0_HtvUMFbNpCGbKfzLxriYP6A",
-  other: {
-    "impact-site-verification": "447ce371-818b-4828-b8a2-92d2beb58137",
+    google: "u8SGir8Mmx0qyViEpt0_HtvUMFbNpCGbKfzLxriYP6A",
   },
-},
+};
 
 export default function RootLayout({
   children,
