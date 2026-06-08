@@ -23,6 +23,7 @@ type CardRow = {
   card_number: string;
   current_market_cents: number;
   tcgplayer_product_id: number | null;
+  expected_pulls_per_pack: number;
 };
 
 type ProductRow = {
@@ -46,11 +47,13 @@ async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; 
   const set = setRows[0];
   if (!set) return null;
 
-  // Chase cards: collapse variant prints by card_number (highest-priced variant wins)
-  // and exclude foreign-set leakage (e.g. OP09 promo card incorrectly tagged to OP13).
-  // The set-code prefix filter only kicks in for games that use a "PREFIX-NUMBER" pattern.
+  // Top value drivers: per-card expected EV contribution to a single booster pack.
+  // Math: expected_pulls_per_pack = (sum of slot probabilities that roll this rarity)
+  //                                  ÷ (cards of that rarity in the set).
+  // Sorted by ev contribution per pack = expected_pulls_per_pack × price.
+  // Same dedup + set-code-leakage filter as before.
   const cards = await db.execute<CardRow>(sql`
-    SELECT * FROM (
+    WITH dedup AS (
       SELECT DISTINCT ON (card_number)
         name, rarity, variant, card_number, current_market_cents, tcgplayer_product_id
       FROM cards
@@ -62,8 +65,26 @@ async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; 
           OR card_number ILIKE ${set.set_code} || '-%'
         )
       ORDER BY card_number, current_market_cents DESC
-    ) dedup
-    ORDER BY current_market_cents DESC
+    ),
+    rarity_pool AS (
+      SELECT rarity, COUNT(*)::float AS pool_size FROM dedup GROUP BY rarity
+    ),
+    slot_totals AS (
+      SELECT rarity, SUM(probability)::float AS pulls_per_pack_rarity
+      FROM pull_rate_templates
+      WHERE set_id = ${set.id} AND pack_type = 'booster_pack'
+      GROUP BY rarity
+    )
+    SELECT
+      d.name, d.rarity, d.variant, d.card_number,
+      d.current_market_cents, d.tcgplayer_product_id,
+      COALESCE(st.pulls_per_pack_rarity / NULLIF(rp.pool_size, 0), 0)::float AS expected_pulls_per_pack
+    FROM dedup d
+    LEFT JOIN rarity_pool rp ON rp.rarity = d.rarity
+    LEFT JOIN slot_totals st ON st.rarity = d.rarity
+    ORDER BY
+      (COALESCE(st.pulls_per_pack_rarity / NULLIF(rp.pool_size, 0), 0) * d.current_market_cents) DESC NULLS LAST,
+      d.current_market_cents DESC
     LIMIT 12
   `);
 
@@ -105,6 +126,13 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
   // Anything >100% is almost always a low-volume product with a wrong sticker price.
   const bestProduct = products.find((p) => p.current_roi_pct != null && p.current_roi_pct > 0 && p.current_roi_pct <= 100);
   const ripIt = bestProduct != null;
+
+  // Anchor the "per box" framing to the dominant booster box in this set.
+  const boxSizes = products
+    .filter((p) => p.product_type === "booster_box" && p.pack_count != null)
+    .map((p) => p.pack_count as number);
+  const boxPackCount: number | null = boxSizes.length > 0 ? Math.max(...boxSizes) : null;
+  const hasEvData = boxPackCount != null && cards.some((c) => c.expected_pulls_per_pack > 0);
 
   const breadcrumbJsonLd = {
     "@context": "https://schema.org",
@@ -236,21 +264,41 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
         </section>
 
         <section className="mt-12">
-          <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Top chase cards</h2>
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">
+              {hasEvData ? "Top value drivers" : "Top chase cards"}
+            </h2>
+            {hasEvData && (
+              <p className="text-xs text-zinc-600">
+                Ranked by expected $ contribution to a {boxPackCount}-pack booster box
+              </p>
+            )}
+          </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {cards.map((c) => {
               const buyUrl = tcgplayerProductUrl(c.tcgplayer_product_id);
+              const pullsPerBox = hasEvData ? c.expected_pulls_per_pack * boxPackCount! : 0;
+              const evPerBoxCents = Math.round(pullsPerBox * c.current_market_cents);
+              const showEv = hasEvData && pullsPerBox > 0;
+              const pullsLabel = pullsPerBox >= 1
+                ? `~${pullsPerBox.toFixed(1)} per box`
+                : `1 in ${(1 / pullsPerBox).toFixed(pullsPerBox < 0.05 ? 0 : 1)} boxes`;
               const inner = (
                 <>
-                  <div>
+                  <div className="min-w-0">
                     <div className="text-sm font-medium text-zinc-100">{c.name}</div>
                     <div className="text-xs text-zinc-500">
                       {c.rarity}
                       {c.variant && c.variant !== "Normal" ? ` · ${c.variant}` : ""}
                       {" · "}#{c.card_number}
                     </div>
+                    {showEv && (
+                      <div className="mt-1 text-xs text-emerald-400/80">
+                        {pullsLabel} · ${(evPerBoxCents / 100).toFixed(2)} box EV
+                      </div>
+                    )}
                   </div>
-                  <div className="ml-3 font-mono text-amber-400">${(c.current_market_cents / 100).toFixed(2)}</div>
+                  <div className="ml-3 shrink-0 font-mono text-amber-400">${(c.current_market_cents / 100).toFixed(2)}</div>
                 </>
               );
               return buyUrl ? (
