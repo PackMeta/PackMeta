@@ -16,13 +16,16 @@ type SetMeta = {
   card_count: number;
 };
 
-type CardRow = {
+type ChaseCardRow = {
   name: string;
   rarity: string;
   variant: string | null;
   card_number: string;
   current_market_cents: number;
   tcgplayer_product_id: number | null;
+};
+
+type CardRow = ChaseCardRow & {
   expected_pulls_per_pack: number;
 };
 
@@ -37,7 +40,7 @@ type ProductRow = {
   tcgplayer_product_id: number | null;
 };
 
-async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; cards: CardRow[]; products: ProductRow[] } | null> {
+async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; chaseCards: ChaseCardRow[]; cards: CardRow[]; products: ProductRow[] } | null> {
   const setRows = await db.execute<SetMeta & { card_count: number }>(sql`
     SELECT s.id, s.slug, s.set_code, s.name, s.release_date::text,
            (SELECT COUNT(*)::int FROM cards WHERE set_id = s.id) AS card_count
@@ -88,6 +91,27 @@ async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; 
     LIMIT 12
   `);
 
+  // Chase cards: the moonshot framing — raw highest market price, no EV weighting.
+  // Same dedup + leakage filter. Pulls 12; the page slices to 6 when also rendering
+  // the value drivers section, falls back to the full 12 when EV data is missing.
+  const chaseCards = await db.execute<ChaseCardRow>(sql`
+    SELECT * FROM (
+      SELECT DISTINCT ON (card_number)
+        name, rarity, variant, card_number, current_market_cents, tcgplayer_product_id
+      FROM cards
+      WHERE set_id = ${set.id}
+        AND current_market_cents IS NOT NULL
+        AND (
+          ${set.set_code}::text IS NULL
+          OR card_number NOT LIKE '%-%'
+          OR card_number ILIKE ${set.set_code} || '-%'
+        )
+      ORDER BY card_number, current_market_cents DESC
+    ) dedup
+    ORDER BY current_market_cents DESC
+    LIMIT 12
+  `);
+
   const products = await db.execute<ProductRow>(sql`
     SELECT slug, name, product_type, pack_count, current_market_cents, current_ev_cents,
            current_roi_pct::float AS current_roi_pct, tcgplayer_product_id
@@ -99,7 +123,7 @@ async function loadSet(gameSlug: string, slug: string): Promise<{ set: SetMeta; 
       pack_count NULLS LAST
   `);
 
-  return { set, cards: Array.from(cards), products: Array.from(products) };
+  return { set, chaseCards: Array.from(chaseCards), cards: Array.from(cards), products: Array.from(products) };
 }
 
 export async function generateMetadata({ params }: { params: Promise<{ game: string; slug: string }> }) {
@@ -121,7 +145,7 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
   const data = await loadSet(game, slug);
   if (!data) notFound();
 
-  const { set, cards, products } = data;
+  const { set, chaseCards, cards, products } = data;
   // Pick a credible "best deal" — positive ROI, but not a clearly stale/mispriced outlier.
   // Anything >100% is almost always a low-volume product with a wrong sticker price.
   const bestProduct = products.find((p) => p.current_roi_pct != null && p.current_roi_pct > 0 && p.current_roi_pct <= 100);
@@ -265,14 +289,54 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
 
         <section className="mt-12">
           <div className="flex items-baseline justify-between gap-4">
-            <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">
-              {hasEvData ? "Top value drivers" : "Top chase cards"}
-            </h2>
-            {hasEvData && (
-              <p className="text-xs text-zinc-600">
-                Ranked by expected $ contribution to a {boxPackCount}-pack booster box
-              </p>
-            )}
+            <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Top chase cards</h2>
+            <p className="text-xs text-zinc-600">The moonshots — what gets the hype</p>
+          </div>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2">
+            {(hasEvData ? chaseCards.slice(0, 6) : chaseCards).map((c) => {
+              const buyUrl = tcgplayerProductUrl(c.tcgplayer_product_id);
+              const inner = (
+                <>
+                  <div className="min-w-0">
+                    <div className="text-sm font-medium text-zinc-100">{c.name}</div>
+                    <div className="text-xs text-zinc-500">
+                      {c.rarity}
+                      {c.variant && c.variant !== "Normal" ? ` · ${c.variant}` : ""}
+                      {" · "}#{c.card_number}
+                    </div>
+                  </div>
+                  <div className="ml-3 shrink-0 font-mono text-amber-400">${(c.current_market_cents / 100).toFixed(2)}</div>
+                </>
+              );
+              return buyUrl ? (
+                <a
+                  key={"chase-" + c.card_number + c.name}
+                  href={buyUrl}
+                  target="_blank"
+                  rel="sponsored noopener"
+                  className="flex items-baseline justify-between rounded-lg bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800 transition hover:bg-zinc-900 hover:ring-amber-400/40"
+                >
+                  {inner}
+                </a>
+              ) : (
+                <div
+                  key={"chase-" + c.card_number + c.name}
+                  className="flex items-baseline justify-between rounded-lg bg-zinc-900/60 px-4 py-3 ring-1 ring-zinc-800"
+                >
+                  {inner}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+
+        {hasEvData && (
+        <section className="mt-12">
+          <div className="flex items-baseline justify-between gap-4">
+            <h2 className="text-xs font-medium uppercase tracking-widest text-zinc-500">Top value drivers</h2>
+            <p className="text-xs text-zinc-600">
+              Ranked by expected $ contribution to a {boxPackCount}-pack booster box
+            </p>
           </div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             {cards.map((c) => {
@@ -322,6 +386,7 @@ export default async function SetPage({ params }: { params: Promise<{ game: stri
             })}
           </div>
         </section>
+        )}
 
         <p className="mt-16 text-xs text-zinc-600">
           EV is a 10,000-iteration Monte Carlo simulation — the *average* outcome across many packs.
